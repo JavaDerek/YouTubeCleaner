@@ -8,6 +8,7 @@ you haven't watched in over one year based on your viewing history.
 
 import os
 import pickle
+import json
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Dict, List, Tuple
@@ -97,85 +98,173 @@ def get_all_subscriptions(youtube) -> List[Dict]:
     print(f"Total subscriptions found: {len(subscriptions)}")
     return subscriptions
 
-def get_watch_history(youtube, cutoff_date: datetime) -> Dict[str, datetime]:
+def load_watch_history_from_file(file_path: str, cutoff_date: datetime) -> Dict[str, datetime]:
     """
-    Fetch the user's watch history and track the most recent view for each channel.
+    Load watch history from a Google Takeout JSON file.
     
     Args:
-        youtube: Authenticated YouTube API service instance.
+        file_path: Path to the watch-history.json file from Google Takeout.
         cutoff_date: The date to look back from (e.g., 1 year ago).
         
     Returns:
         Dictionary mapping channel IDs to their most recent view date.
     """
-    print(f"\nFetching your watch history (looking back to {cutoff_date.strftime('%Y-%m-%d')})...")
+    print(f"\nLoading watch history from file: {file_path}")
+    print(f"Looking for videos watched since: {cutoff_date.strftime('%Y-%m-%d')}")
+    
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(
+            f"Watch history file not found: {file_path}\n\n"
+            "Please download your YouTube watch history:\n"
+            "  1. Go to https://takeout.google.com\n"
+            "  2. Deselect all, then select only 'YouTube and YouTube Music'\n"
+            "  3. Click 'All YouTube data included', then deselect all\n"
+            "  4. Select only 'history'\n"
+            "  5. Click 'Next step' and create export\n"
+            "  6. Download and extract the archive\n"
+            "  7. Place 'watch-history.json' in this directory"
+        )
+    
     channel_last_watched = defaultdict(lambda: None)
-    next_page_token = None
     videos_checked = 0
+    videos_in_timeframe = 0
     
     try:
-        # Note: YouTube's myRating API doesn't provide full watch history
-        # We'll use the activity API to get watched videos
-        while True:
-            request = youtube.activities().list(
-                part='snippet,contentDetails',
-                mine=True,
-                maxResults=50,
-                pageToken=next_page_token
+        with open(file_path, 'r', encoding='utf-8') as f:
+            watch_history = json.load(f)
+        
+        print(f"Loaded {len(watch_history)} entries from watch history file")
+        
+        for entry in watch_history:
+            videos_checked += 1
+            
+            # Google Takeout format uses 'time' field
+            time_str = entry.get('time')
+            if not time_str:
+                continue
+            
+            # Parse the timestamp (format: 2024-12-31T12:34:56.789Z)
+            try:
+                # Handle different possible timestamp formats
+                time_str = time_str.replace('+00:00', 'Z')
+                if '.' in time_str:
+                    # Has milliseconds
+                    watched_at = datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+                else:
+                    # No milliseconds
+                    watched_at = datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%SZ')
+            except ValueError:
+                # Try alternate formats
+                try:
+                    watched_at = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+                    watched_at = watched_at.replace(tzinfo=None)  # Make naive
+                except:
+                    continue
+            
+            # Only process videos within our timeframe
+            if watched_at < cutoff_date:
+                continue
+            
+            videos_in_timeframe += 1
+            
+            # Extract channel information
+            # Google Takeout format: "titleUrl" contains the video URL
+            title_url = entry.get('titleUrl', '')
+            
+            # The subtitles array contains channel info
+            subtitles = entry.get('subtitles', [])
+            channel_url = None
+            channel_name = None
+            
+            for subtitle in subtitles:
+                if 'url' in subtitle:
+                    channel_url = subtitle['url']
+                    channel_name = subtitle.get('name', '')
+                    break
+            
+            if channel_url:
+                # Extract channel ID from URL
+                # Format: https://www.youtube.com/channel/CHANNEL_ID
+                # or: https://www.youtube.com/@username
+                if '/channel/' in channel_url:
+                    channel_id = channel_url.split('/channel/')[-1].strip()
+                elif '/@' in channel_url:
+                    # For @username format, we'll use the username as identifier
+                    # (we'll need to look it up via API later if needed)
+                    channel_id = channel_url.split('/@')[-1].strip()
+                else:
+                    continue
+                
+                # Update the last watched date for this channel
+                if channel_last_watched[channel_id] is None or watched_at > channel_last_watched[channel_id]:
+                    channel_last_watched[channel_id] = watched_at
+            
+            if videos_checked % 1000 == 0:
+                print(f"  Processed {videos_checked:,} entries... ({videos_in_timeframe:,} in timeframe)")
+        
+        print(f"\nProcessing complete:")
+        print(f"  Total entries in file: {videos_checked:,}")
+        print(f"  Videos watched since cutoff: {videos_in_timeframe:,}")
+        print(f"  Unique channels found: {len(channel_last_watched):,}")
+        
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON file format: {e}")
+    except Exception as e:
+        raise Exception(f"Error reading watch history file: {e}")
+    
+    return dict(channel_last_watched)
+
+
+def resolve_channel_handles(youtube, channel_identifiers: List[str]) -> Dict[str, str]:
+    """
+    Resolve @username handles to channel IDs using the YouTube API.
+    
+    Args:
+        youtube: Authenticated YouTube API service instance.
+        channel_identifiers: List of channel IDs or @username handles.
+        
+    Returns:
+        Dictionary mapping original identifier to channel ID.
+    """
+    resolved = {}
+    handles_to_resolve = []
+    
+    for identifier in channel_identifiers:
+        if identifier.startswith('@') or not identifier.startswith('UC'):
+            handles_to_resolve.append(identifier)
+        else:
+            resolved[identifier] = identifier  # Already a channel ID
+    
+    if not handles_to_resolve:
+        return resolved
+    
+    print(f"\nResolving {len(handles_to_resolve)} channel handles to IDs...")
+    
+    for handle in handles_to_resolve:
+        try:
+            # Search for the channel by handle
+            search_query = handle.replace('@', '')
+            request = youtube.search().list(
+                part='snippet',
+                q=search_query,
+                type='channel',
+                maxResults=1
             )
             response = request.execute()
             
             items = response.get('items', [])
-            
-            for item in items:
-                videos_checked += 1
+            if items:
+                channel_id = items[0]['id']['channelId']
+                resolved[handle] = channel_id
+            else:
+                resolved[handle] = handle  # Keep original if not found
                 
-                # Get the published date of the activity
-                published_at_str = item['snippet'].get('publishedAt')
-                if not published_at_str:
-                    continue
-                    
-                published_at = datetime.strptime(published_at_str, '%Y-%m-%dT%H:%M:%SZ')
-                
-                # If this activity is older than our cutoff, we can stop
-                if published_at < cutoff_date:
-                    print(f"  Reached activities older than cutoff date. Stopping.")
-                    return channel_last_watched
-                
-                # Check different activity types
-                snippet = item['snippet']
-                channel_id = None
-                
-                # For uploaded videos or recommendations
-                if 'resourceId' in snippet:
-                    resource_id = snippet['resourceId']
-                    if resource_id.get('kind') == 'youtube#video':
-                        # This is a video - get its channel
-                        channel_id = snippet.get('channelId')
-                
-                # For playback activities (if available in contentDetails)
-                content_details = item.get('contentDetails', {})
-                if 'playlistItem' in content_details:
-                    playlist_item = content_details['playlistItem']
-                    channel_id = playlist_item.get('resourceId', {}).get('channelId')
-                
-                if channel_id:
-                    # Update the last watched date for this channel
-                    if channel_last_watched[channel_id] is None or published_at > channel_last_watched[channel_id]:
-                        channel_last_watched[channel_id] = published_at
-            
-            print(f"  Checked {videos_checked} activities...")
-            
-            next_page_token = response.get('nextPageToken')
-            if not next_page_token:
-                break
-                
-    except HttpError as e:
-        print(f"An error occurred while fetching watch history: {e}")
+        except HttpError:
+            resolved[handle] = handle  # Keep original if lookup fails
     
-    print(f"Total activities checked: {videos_checked}")
-    print(f"Unique channels found in history: {len(channel_last_watched)}")
-    return dict(channel_last_watched)
+    print(f"  Resolved {len([v for k, v in resolved.items() if k != v])} handles")
+    
+    return resolved
 
 def analyze_subscriptions(subscriptions: List[Dict], watch_history: Dict[str, datetime], 
                          cutoff_date: datetime) -> Tuple[List[Dict], List[Dict]]:
@@ -306,13 +395,28 @@ def main():
     print("=" * 80)
     print("YOUTUBE SUBSCRIPTION ANALYZER")
     print("=" * 80)
-    print("\nThis script will identify YouTube channels you haven't watched in over a year.")
-    print("\nNote: Due to YouTube API limitations, this analysis is based on available")
-    print("activity data and may not capture all viewing history.")
+    print("\nThis script analyzes which YouTube subscriptions you HAVEN'T watched in a year.")
+    print("It uses your Google Takeout watch history data for accurate results.")
     print()
     
+    # Check for watch history file
+    watch_history_file = 'watch-history.json'
+    if not os.path.exists(watch_history_file):
+        print("ERROR: watch-history.json not found!")
+        print("\nTo get your watch history:")
+        print("  1. Go to https://takeout.google.com")
+        print("  2. Deselect all, then select only 'YouTube and YouTube Music'")
+        print("  3. Click 'All YouTube data included', then deselect all")
+        print("  4. Select only 'history'")
+        print("  5. Click 'Next step', choose file type and delivery method")
+        print("  6. Click 'Create export' and wait for email notification")
+        print("  7. Download and extract the archive")
+        print("  8. Place 'watch-history.json' in this directory")
+        print(f"\nExpected location: {os.path.abspath(watch_history_file)}")
+        return
+    
     try:
-        # Authenticate with YouTube API
+        # Authenticate with YouTube API (for subscriptions)
         youtube = get_authenticated_service()
         
         # Define cutoff date (1 year ago from today)
@@ -325,8 +429,23 @@ def main():
             print("No subscriptions found or unable to fetch subscriptions.")
             return
         
-        # Fetch watch history
-        watch_history = get_watch_history(youtube, cutoff_date)
+        # Load watch history from file
+        watch_history = load_watch_history_from_file(watch_history_file, cutoff_date)
+        
+        # Resolve any @username handles to channel IDs
+        if watch_history:
+            handles = [ch_id for ch_id in watch_history.keys() if ch_id.startswith('@') or not ch_id.startswith('UC')]
+            if handles:
+                resolved = resolve_channel_handles(youtube, handles)
+                # Update watch_history with resolved IDs
+                new_history = {}
+                for ch_id, date in watch_history.items():
+                    resolved_id = resolved.get(ch_id, ch_id)
+                    if resolved_id in new_history:
+                        new_history[resolved_id] = max(new_history[resolved_id], date)
+                    else:
+                        new_history[resolved_id] = date
+                watch_history = new_history
         
         # Analyze subscriptions
         unwatched, watched = analyze_subscriptions(subscriptions, watch_history, cutoff_date)
@@ -339,7 +458,6 @@ def main():
         
     except FileNotFoundError as e:
         print(f"\nError: {e}")
-        print("\nPlease follow the setup instructions in the README to obtain credentials.json")
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")
         import traceback
