@@ -1,0 +1,43 @@
+YOUTUBE SUBSCRIPTION ANALYSIS RESULTS
+Generated: 2024-01-15 14:30:00
+================================================================================
+
+Total Subscriptions: 50
+Watched in last year: 35
+NOT watched in last year: 15
+
+--------------------------------------------------------------------------------
+CHANNELS NOT WATCHED IN OVER ONE YEAR:
+--------------------------------------------------------------------------------
+
+1. Example Tech Channel
+   Channel ID: UCxxxxxxxxxxxxxxxxxxx1
+   Status: Last watched 2022-11-20
+   URL: https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxx1
+
+2. Old Gaming Channel
+   Channel ID: UCxxxxxxxxxxxxxxxxxxx2
+   Status: No viewing activity found
+   URL: https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxx2
+
+3. Cooking Channel XYZ
+   Channel ID: UCxxxxxxxxxxxxxxxxxxx3
+   Status: Last watched 2023-01-05
+   URL: https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxx3
+
+...
+
+--------------------------------------------------------------------------------
+CHANNELS WATCHED IN THE LAST YEAR:
+--------------------------------------------------------------------------------
+
+1. Active Tech Channel
+   Last watched: 2024-01-10
+
+2. Daily News Channel
+   Last watched: 2024-01-14
+
+3. Popular Vlogger
+   Last watched: 2024-01-12
+
+...
