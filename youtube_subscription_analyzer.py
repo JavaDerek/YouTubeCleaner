@@ -25,6 +25,12 @@ SCOPES = [
     'https://www.googleapis.com/auth/youtube.force-ssl'
 ]
 
+# When unsubscribing is needed, we'll need this scope too:
+SCOPES_WITH_WRITE = [
+    'https://www.googleapis.com/auth/youtube',
+    'https://www.googleapis.com/auth/youtube.force-ssl'
+]
+
 def get_authenticated_service():
     """
     Authenticate with YouTube API and return the service object.
@@ -283,6 +289,7 @@ def analyze_subscriptions(subscriptions: List[Dict], watch_history: Dict[str, da
     watched = []
     
     for sub in subscriptions:
+        subscription_id = sub['id']  # This is needed for unsubscribing
         channel_id = sub['snippet']['resourceId']['channelId']
         channel_title = sub['snippet']['title']
         
@@ -293,6 +300,7 @@ def analyze_subscriptions(subscriptions: List[Dict], watch_history: Dict[str, da
             unwatched.append({
                 'title': channel_title,
                 'channel_id': channel_id,
+                'subscription_id': subscription_id,
                 'last_watched': None,
                 'reason': 'No viewing activity found'
             })
@@ -301,6 +309,7 @@ def analyze_subscriptions(subscriptions: List[Dict], watch_history: Dict[str, da
             unwatched.append({
                 'title': channel_title,
                 'channel_id': channel_id,
+                'subscription_id': subscription_id,
                 'last_watched': last_watched,
                 'reason': f'Last watched {last_watched.strftime("%Y-%m-%d")}'
             })
@@ -345,6 +354,128 @@ def print_results(unwatched: List[Dict], watched: List[Dict], total: int):
         print("\nGreat! You've watched videos from all your subscribed channels in the last year.")
     
     print("\n" + "=" * 80)
+
+def unsubscribe_from_channels(youtube, channels: List[Dict]) -> Tuple[int, int]:
+    """
+    Unsubscribe from a list of channels.
+    
+    Args:
+        youtube: Authenticated YouTube API service instance.
+        channels: List of channel dictionaries with subscription_id.
+        
+    Returns:
+        Tuple of (successful_count, failed_count).
+    """
+    successful = 0
+    failed = 0
+    
+    print("\nUnsubscribing from channels...")
+    
+    for i, channel in enumerate(channels, 1):
+        try:
+            youtube.subscriptions().delete(
+                id=channel['subscription_id']
+            ).execute()
+            
+            print(f"  [{i}/{len(channels)}] ✓ Unsubscribed from: {channel['title']}")
+            successful += 1
+            
+        except HttpError as e:
+            print(f"  [{i}/{len(channels)}] ✗ Failed to unsubscribe from: {channel['title']}")
+            print(f"      Error: {e._get_reason()}")
+            failed += 1
+    
+    return successful, failed
+
+
+def interactive_unsubscribe(youtube, unwatched: List[Dict]):
+    """
+    Prompt user to selectively unsubscribe from channels.
+    
+    Args:
+        youtube: Authenticated YouTube API service instance.
+        unwatched: List of unwatched channel dictionaries.
+    """
+    if not unwatched:
+        return
+    
+    print("\n" + "=" * 80)
+    print("UNSUBSCRIBE OPTIONS")
+    print("=" * 80)
+    
+    print(f"\nYou have {len(unwatched)} channels you haven't watched in over a year.")
+    print("\nWhat would you like to do?")
+    print("  1. Unsubscribe from ALL of them")
+    print("  2. Select specific channels to unsubscribe from")
+    print("  3. Don't unsubscribe (exit)")
+    
+    choice = input("\nEnter your choice (1-3): ").strip()
+    
+    if choice == '1':
+        # Unsubscribe from all
+        print(f"\nYou're about to unsubscribe from {len(unwatched)} channels.")
+        confirm = input("Are you sure? Type 'YES' to confirm: ").strip()
+        
+        if confirm == 'YES':
+            successful, failed = unsubscribe_from_channels(youtube, unwatched)
+            print(f"\n" + "=" * 80)
+            print(f"UNSUBSCRIBE COMPLETE")
+            print(f"Successfully unsubscribed: {successful}")
+            print(f"Failed: {failed}")
+            print("=" * 80)
+        else:
+            print("\nCancelled. No channels were unsubscribed.")
+    
+    elif choice == '2':
+        # Interactive selection
+        print("\nEnter the numbers of channels to unsubscribe from (comma-separated).")
+        print("Example: 1,3,5-10,15")
+        print("\nChannels:")
+        
+        # Show numbered list
+        for i, channel in enumerate(unwatched, 1):
+            print(f"  {i}. {channel['title']} - {channel['reason']}")
+        
+        selection = input("\nYour selection: ").strip()
+        
+        # Parse selection
+        selected_indices = set()
+        try:
+            for part in selection.split(','):
+                part = part.strip()
+                if '-' in part:
+                    # Range like 5-10
+                    start, end = part.split('-')
+                    selected_indices.update(range(int(start), int(end) + 1))
+                else:
+                    # Single number
+                    selected_indices.add(int(part))
+            
+            # Get selected channels
+            selected_channels = [unwatched[i-1] for i in selected_indices if 1 <= i <= len(unwatched)]
+            
+            if selected_channels:
+                print(f"\nYou selected {len(selected_channels)} channels to unsubscribe from.")
+                confirm = input("Type 'YES' to confirm: ").strip()
+                
+                if confirm == 'YES':
+                    successful, failed = unsubscribe_from_channels(youtube, selected_channels)
+                    print(f"\n" + "=" * 80)
+                    print(f"UNSUBSCRIBE COMPLETE")
+                    print(f"Successfully unsubscribed: {successful}")
+                    print(f"Failed: {failed}")
+                    print("=" * 80)
+                else:
+                    print("\nCancelled. No channels were unsubscribed.")
+            else:
+                print("\nNo valid channels selected.")
+                
+        except (ValueError, IndexError) as e:
+            print(f"\nInvalid selection format. No channels were unsubscribed.")
+    
+    else:
+        print("\nNo channels were unsubscribed.")
+
 
 def save_results_to_file(unwatched: List[Dict], watched: List[Dict]):
     """
@@ -455,6 +586,11 @@ def main():
         
         # Save results to file
         save_results_to_file(unwatched, watched)
+        
+        # Offer to unsubscribe from unwatched channels
+        if unwatched:
+            print("\n" + "=" * 80)
+            interactive_unsubscribe(youtube, unwatched)
         
     except FileNotFoundError as e:
         print(f"\nError: {e}")
