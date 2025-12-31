@@ -81,6 +81,8 @@ The script generates two outputs:
 
 ### Example Output
 
+See [example_output.txt](example_output.txt) for a sample of what the generated report looks like.
+
 ```
 ================================================================================
 YOUTUBE SUBSCRIPTION ANALYSIS RESULTS

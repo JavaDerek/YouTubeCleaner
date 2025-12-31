@@ -10,7 +10,7 @@ import os
 import pickle
 from datetime import datetime, timedelta
 from collections import defaultdict
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -176,28 +176,6 @@ def get_watch_history(youtube, cutoff_date: datetime) -> Dict[str, datetime]:
     print(f"Total activities checked: {videos_checked}")
     print(f"Unique channels found in history: {len(channel_last_watched)}")
     return dict(channel_last_watched)
-
-def get_video_watch_history(youtube, cutoff_date: datetime) -> Dict[str, datetime]:
-    """
-    Alternative method: Get watched videos from user's liked videos and search history.
-    This is a fallback method since full watch history may not be available via API.
-    
-    Args:
-        youtube: Authenticated YouTube API service instance.
-        cutoff_date: The date to look back from (e.g., 1 year ago).
-        
-    Returns:
-        Dictionary mapping channel IDs to their most recent view date.
-    """
-    print(f"\nAttempting to fetch video details from search history...")
-    channel_last_watched = {}
-    
-    # Note: The YouTube API has limitations on accessing full watch history
-    # This is a best-effort approach
-    print("Note: Due to YouTube API limitations, full watch history may not be available.")
-    print("The script will do its best to identify unwatched channels based on available data.")
-    
-    return channel_last_watched
 
 def analyze_subscriptions(subscriptions: List[Dict], watch_history: Dict[str, datetime], 
                          cutoff_date: datetime) -> Tuple[List[Dict], List[Dict]]:

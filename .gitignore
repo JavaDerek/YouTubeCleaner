@@ -37,6 +37,7 @@ ENV/
 # Credentials and sensitive files
 credentials.json
 token.json
+token.pickle
 client_secret*.json
 *.key
 *.pem
