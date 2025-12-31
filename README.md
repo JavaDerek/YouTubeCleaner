@@ -20,6 +20,7 @@ This is now the *only supported and reliable* way to perform this analysis.
 * Fetches all current YouTube channel subscriptions via API
 * Analyzes **actual watch history** using Google Takeout JSON
 * Identifies channels not watched in the past 365 days
+* **Interactive unsubscribe feature** - choose which channels to unsubscribe from
 * Generates detailed reports with channel names, IDs, and direct links
 * Saves results to a timestamped text file for future reference
 
@@ -71,10 +72,11 @@ Google’s UI has changed. OAuth configuration is now split across multiple sect
 3. Add the following scopes:
 
    ```
-   https://www.googleapis.com/auth/youtube.readonly
+   https://www.googleapis.com/auth/youtube
    https://www.googleapis.com/auth/youtube.force-ssl
    ```
 
+   > Note: `youtube` scope (not `youtube.readonly`) is required for the unsubscribe feature.
    > These scopes are classified by Google as **Sensitive**, not Restricted.
    > No app verification is required as long as you remain in Testing.
 
@@ -159,7 +161,8 @@ python youtube_subscription_analyzer.py
 4. The script will:
 
    * Fetch subscriptions via the YouTube Data API
-   * Analyze watch history from the Takeout export
+   * Analyze watch his
+   * Prompt you to optionally unsubscribe from unwatched channelstory from the Takeout export
    * Generate a report
 
 ---
@@ -216,7 +219,7 @@ This tool reflects that reality.
 ### Privacy & Security
 
 * `credentials.json`, OAuth tokens, and Takeout exports contain **sensitive personal data**
-* These files are excluded via `.gitignore`
+* These filescan unsubscribe from channels (requires your explicit confirmation)
 * Never commit or share them publicly
 * The script is **read-only** and does not modify subscriptions
 
